@@ -18,6 +18,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 class UserStates(StatesGroup):
     phone = State()
     location = State()
+    video_url = State()
 
 # Initialize bot and dispatcher
 bot = Bot(token=TOKEN)
@@ -105,6 +106,21 @@ async def process_game_move(callback: CallbackQuery):
         parse_mode="HTML"
     )
 
+@dp.message(Command("video"))
+async def cmd_video(message: types.Message, state: FSMContext):
+    await state.set_state(UserStates.video_url)
+    await message.answer(
+        "📹 <b>Video yuklash tartibi:</b>\n\n"
+        "Iltimos, video havolasini (link) yuboring.\n"
+        "<i>Men YouTube, Instagram, TikTok va boshqa ko'plab saytlarni qo'llab-quvvatlayman.</i>",
+        parse_mode="HTML",
+        reply_markup=types.ReplyKeyboardMarkup(
+            keyboard=[[types.KeyboardButton(text="❌ Bekor qilish")]],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+    )
+
 @dp.message(F.text == "❌ Bekor qilish")
 async def cmd_cancel(message: types.Message, state: FSMContext):
     await state.clear()
@@ -145,8 +161,8 @@ async def location_invalid(message: types.Message):
     await message.reply("Iltimos, manzilni pastdagi tugma orqali yuboring. 📍")
 
 # Video Downloader Logic
-@dp.message(lambda msg: msg.text and (msg.text.startswith("http") or "youtube.com" in msg.text or "youtu.be" in msg.text))
-async def process_video_link(message: types.Message):
+@dp.message(UserStates.video_url, lambda msg: msg.text and (msg.text.startswith("http") or "youtube.com" in msg.text or "youtu.be" in msg.text))
+async def process_video_link(message: types.Message, state: FSMContext):
     url = message.text.strip()
     status_msg = await message.reply("🔍 <i>Video qidirilmoqda...</i>", parse_mode="HTML")
     
@@ -180,6 +196,9 @@ async def process_video_link(message: types.Message):
         reply_markup=kb,
         parse_mode="HTML"
     )
+    # Clear state so they don't get stuck in video mode, 
+    # but still can interact with inline buttons
+    await state.clear()
 
 @dp.callback_query(F.data.startswith("download_"))
 async def process_download_callback(callback: CallbackQuery):
