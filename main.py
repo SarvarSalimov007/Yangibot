@@ -5,8 +5,9 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
 from game import BoxingGame
+from video_downloader import VideoDownloader
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -59,6 +60,7 @@ def get_game_kb():
 
 # Initialize Game
 game = BoxingGame()
+downloader = VideoDownloader()
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
@@ -141,6 +143,74 @@ async def phone_invalid(message: types.Message):
 @dp.message(UserStates.location)
 async def location_invalid(message: types.Message):
     await message.reply("Iltimos, manzilni pastdagi tugma orqali yuboring. 📍")
+
+# Video Downloader Logic
+@dp.message(lambda msg: msg.text and (msg.text.startswith("http") or "youtube.com" in msg.text or "youtu.be" in msg.text))
+async def process_video_link(message: types.Message):
+    url = message.text.strip()
+    status_msg = await message.reply("🔍 <i>Video qidirilmoqda...</i>", parse_mode="HTML")
+    
+    qualities, title = await downloader.extract_info(url)
+    
+    if not qualities:
+        await status_msg.edit_text("❌ <b>Video topilmadi yoki yuklab bo'lmaydi.</b>\nLink to'g'riligini tekshiring.", parse_mode="HTML")
+        return
+
+    # Create keyboard with quality options
+    rows = []
+    chunk_size = 2
+    for i in range(0, len(qualities), chunk_size):
+        chunk = qualities[i:i + chunk_size]
+        row = [InlineKeyboardButton(text=f"📥 {q}", callback_data=f"download_{q}") for q in chunk]
+        rows.append(row)
+        
+    # Store URL in memory (simplest way for now, better to use state or temporary storage)
+    # Using a simple trick: append URL hash or ID to callback, but URL might be long.
+    # For now, we'll store it in a simple dict mapping user_id -> url
+    # Note: Global variable is not ideal for production but works for simple bot
+    if not hasattr(bot, 'user_urls'):
+        bot.user_urls = {}
+    bot.user_urls[message.from_user.id] = url
+        
+    kb = InlineKeyboardMarkup(inline_keyboard=rows)
+    
+    await status_msg.edit_text(
+        f"📹 <b>Video:</b> {title}\n"
+        f"✅ <i>Sifatni tanlang:</i>",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.startswith("download_"))
+async def process_download_callback(callback: CallbackQuery):
+    quality = callback.data.split("_")[1]
+    user_id = callback.from_user.id
+    
+    if not hasattr(bot, 'user_urls') or user_id not in bot.user_urls:
+        await callback.answer("❌ Eskirgan so'rov. Linkni qayta yuboring.", show_alert=True)
+        return
+
+    url = bot.user_urls[user_id]
+    await callback.message.edit_text(f"⏳ <i>Yuklanmoqda ({quality})...\nBiroz kuting.</i>", parse_mode="HTML")
+    
+    filepath = await downloader.download_video(url, quality)
+    
+    if filepath and os.path.exists(filepath):
+        try:
+            await callback.message.edit_text("📤 <i>Video yuborilmoqda...</i>", parse_mode="HTML")
+            video_file = FSInputFile(filepath)
+            await callback.message.answer_video(video_file, caption=f"🎥 <b>Sifat:</b> {quality}\n🤖 @Yangibot", parse_mode="HTML")
+            await callback.message.delete() # Remove status message
+        except Exception as e:
+            await callback.message.edit_text(f"❌ Yuborishda xatolik: {e}")
+        finally:
+            # Clean up encoded file
+            try:
+                os.remove(filepath)
+            except:
+                pass
+    else:
+        await callback.message.edit_text("❌ Yuklashda xatolik yuz berdi.")
 
 async def main():
     logging.basicConfig(level=logging.INFO)
