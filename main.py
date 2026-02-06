@@ -190,14 +190,16 @@ async def process_video_link(message: types.Message, state: FSMContext):
         
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
     
+    ffmpeg_warning = ""
+    if not downloader.ffmpeg_available:
+        ffmpeg_warning = "\n\n⚠️ <i>Diqqat: Tizimda FFmpeg mavjud emas. Yuqori sifatli (1080p, 4K) videolar ovozsiz bo'lishi yoki sifati pasayishi mumkin.</i>"
+
     await status_msg.edit_text(
         f"📹 <b>Video:</b> {title}\n"
-        f"✅ <i>Sifatni tanlang:</i>",
+        f"✅ <i>Sifatni tanlang:</i>{ffmpeg_warning}",
         reply_markup=kb,
         parse_mode="HTML"
     )
-    # Clear state so they don't get stuck in video mode, 
-    # but still can interact with inline buttons
     await state.clear()
 
 @dp.callback_query(F.data.startswith("download_"))
@@ -215,21 +217,36 @@ async def process_download_callback(callback: CallbackQuery):
     filepath = await downloader.download_video(url, quality)
     
     if filepath and os.path.exists(filepath):
+        filesize_mb = os.path.getsize(filepath) / (1024 * 1024)
+        
+        if filesize_mb > 50:
+            await callback.message.edit_text(
+                f"❌ <b>Xatolik:</b> Video hajmi juda katta ({filesize_mb:.1f} MB).\n"
+                f"Telegram botlar orqali faqat 50 MB gacha bo'lgan fayllarni yuborish mumkin.\n"
+                f"<i>Iltimos, pastroq sifatni tanlang.</i>",
+                parse_mode="HTML"
+            )
+            # Cleanup
+            try: os.remove(filepath)
+            except: pass
+            return
+
         try:
             await callback.message.edit_text("📤 <i>Video yuborilmoqda...</i>", parse_mode="HTML")
             video_file = FSInputFile(filepath)
-            await callback.message.answer_video(video_file, caption=f"🎥 <b>Sifat:</b> {quality}\n🤖 @Yangibot", parse_mode="HTML")
-            await callback.message.delete() # Remove status message
+            await callback.message.answer_video(
+                video_file, 
+                caption=f"🎥 <b>Sifat:</b> {quality}\n⚖️ <b>Hajmi:</b> {filesize_mb:.1f} MB\n🤖 @Yangibot", 
+                parse_mode="HTML"
+            )
+            await callback.message.delete()
         except Exception as e:
             await callback.message.edit_text(f"❌ Yuborishda xatolik: {e}")
         finally:
-            # Clean up encoded file
-            try:
-                os.remove(filepath)
-            except:
-                pass
+            try: os.remove(filepath)
+            except: pass
     else:
-        await callback.message.edit_text("❌ Yuklashda xatolik yuz berdi.")
+        await callback.message.edit_text("❌ Yuklashda xatolik yuz berdi. Linkni yoki sifatni tekshiring.")
 
 async def main():
     logging.basicConfig(level=logging.INFO)
