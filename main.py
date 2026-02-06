@@ -212,41 +212,40 @@ async def process_download_callback(callback: CallbackQuery):
         return
 
     url = bot.user_urls[user_id]
-    await callback.message.edit_text(f"⏳ <i>Yuklanmoqda ({quality})...\nBiroz kuting.</i>", parse_mode="HTML")
+    status_msg = await callback.message.edit_text(f"⏳ <b>Yuklash boshlandi...</b>\n<i>Sifat: {quality}</i>", parse_mode="HTML")
     
-    filepath = await downloader.download_video(url, quality)
-    
-    if filepath and os.path.exists(filepath):
-        filesize_mb = os.path.getsize(filepath) / (1024 * 1024)
+    try:
+        filepath = await downloader.download_video(url, quality)
         
-        if filesize_mb > 50:
-            await callback.message.edit_text(
-                f"❌ <b>Xatolik:</b> Video hajmi juda katta ({filesize_mb:.1f} MB).\n"
-                f"Telegram botlar orqali faqat 50 MB gacha bo'lgan fayllarni yuborish mumkin.\n"
-                f"<i>Iltimos, pastroq sifatni tanlang.</i>",
-                parse_mode="HTML"
-            )
-            # Cleanup
+        if filepath and os.path.exists(filepath):
+            filesize_mb = os.path.getsize(filepath) / (1024 * 1024)
+            
+            if filesize_mb > 50:
+                await status_msg.edit_text(
+                    f"❌ <b>Xatolik:</b> Video hajmi juda katta ({filesize_mb:.1f} MB).\n\n"
+                    f"Telegram botlar orqali faqat 50 MB gacha bo'lgan fayllarni yuborish mumkin.\n"
+                    f"<i>Maslahat: Pastroq sifatni (masalan, 720p yoki 360p) tanlab ko'ring.</i>",
+                    parse_mode="HTML"
+                )
+            else:
+                await status_msg.edit_text("📤 <b>Video yuborilmoqda...</b>", parse_mode="HTML")
+                video_file = FSInputFile(filepath)
+                await callback.message.answer_video(
+                    video_file, 
+                    caption=f"🎥 <b>Sifat:</b> {quality}\n⚖️ <b>Hajmi:</b> {filesize_mb:.1f} MB\n🤖 @Yangibot", 
+                    parse_mode="HTML"
+                )
+                await status_msg.delete()
+        else:
+            await status_msg.edit_text("❌ <b>Yuklashda xatolik yuz berdi.</b>\nBu link yoki sifat ushbu video uchun ishlamadi.")
+            
+    except Exception as e:
+        await callback.message.answer(f"❌ Kutilmagan xatolik: {str(e)}")
+    finally:
+        # Cleanup is critical
+        if 'filepath' in locals() and filepath and os.path.exists(filepath):
             try: os.remove(filepath)
             except: pass
-            return
-
-        try:
-            await callback.message.edit_text("📤 <i>Video yuborilmoqda...</i>", parse_mode="HTML")
-            video_file = FSInputFile(filepath)
-            await callback.message.answer_video(
-                video_file, 
-                caption=f"🎥 <b>Sifat:</b> {quality}\n⚖️ <b>Hajmi:</b> {filesize_mb:.1f} MB\n🤖 @Yangibot", 
-                parse_mode="HTML"
-            )
-            await callback.message.delete()
-        except Exception as e:
-            await callback.message.edit_text(f"❌ Yuborishda xatolik: {e}")
-        finally:
-            try: os.remove(filepath)
-            except: pass
-    else:
-        await callback.message.edit_text("❌ Yuklashda xatolik yuz berdi. Linkni yoki sifatni tekshiring.")
 
 async def main():
     logging.basicConfig(level=logging.INFO)
