@@ -25,11 +25,27 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 # Keyboards
+# Keyboards
+def get_main_kb():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📹 Video Yuklash"), KeyboardButton(text="🎮 O'yin O'ynash")],
+            [KeyboardButton(text="ℹ️ Ma'lumot"), KeyboardButton(text="📞 Bog'lanish")]
+        ],
+        resize_keyboard=True
+    )
+
+def get_back_kb():
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="⬅️ Orqaga")]],
+        resize_keyboard=True
+    )
+
 def get_phone_kb():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📱 Telefon raqamingizni yuboring", request_contact=True)],
-            [KeyboardButton(text="❌ Bekor qilish")]
+            [KeyboardButton(text="⬅️ Orqaga")]
         ],
         resize_keyboard=True,
         one_time_keyboard=True
@@ -39,7 +55,7 @@ def get_location_kb():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📍 Manzilni yuboring", request_location=True)],
-            [KeyboardButton(text="❌ Bekor qilish")]
+            [KeyboardButton(text="⬅️ Orqaga")]
         ],
         resize_keyboard=True,
         one_time_keyboard=True
@@ -55,6 +71,9 @@ def get_game_kb():
             ],
             [
                 InlineKeyboardButton(text="🛡 Blok", callback_data="move_block")
+            ],
+            [
+                InlineKeyboardButton(text="⬅️ Asosiy Menuga", callback_data="back_to_main")
             ]
         ]
     )
@@ -65,16 +84,42 @@ downloader = VideoDownloader()
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
-    await state.set_state(UserStates.phone)
+    await state.clear()
     await message.answer(
         "<b>👋 Assalomu alaykum!</b>\n\n"
         "🤖 <i>Yangibot</i> tizimiga xush kelibsiz.\n"
         "🚀 <i>Biz bilan o'yindan zavqlaning va xizmatlardan foydalaning!</i>\n\n"
-        "🔽 <b>Davom etish uchun telefon raqamingizni yuboring:</b>",
-        reply_markup=get_phone_kb(),
+        "🔽 <b>Kerakli bo'limni tanlang:</b>",
+        reply_markup=get_main_kb(),
         parse_mode="HTML"
     )
 
+@dp.message(F.text == "⬅️ Orqaga")
+@dp.message(Command("cancel"))
+async def cmd_back(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Bosh sahifa", reply_markup=get_main_kb())
+
+@dp.callback_query(F.data == "back_to_main")
+async def back_to_main_callback(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.delete()
+    await callback.message.answer("Asosiy menu", reply_markup=get_main_kb())
+
+@dp.message(F.text == "📹 Video Yuklash")
+@dp.message(Command("video"))
+async def cmd_video(message: types.Message, state: FSMContext):
+    await state.set_state(UserStates.video_url)
+    await message.answer(
+        "📹 <b>Video yuklash bo'limi</b>\n\n"
+        "Iltimos, video havolasini (link) yuboring.\n"
+        "<i>Men YouTube, Instagram, TikTok va hokazolardan yuklay olaman.</i>\n\n"
+        "Sifatni tanlash imkoniyati mavjud! ✅",
+        parse_mode="HTML",
+        reply_markup=get_back_kb()
+    )
+
+@dp.message(F.text == "🎮 O'yin O'ynash")
 @dp.message(Command("game"))
 async def cmd_game(message: types.Message):
     await message.answer(
@@ -88,6 +133,27 @@ async def cmd_game(message: types.Message):
         parse_mode="HTML"
     )
 
+@dp.message(F.text == "ℹ️ Ma'lumot")
+async def cmd_info(message: types.Message):
+    await message.answer(
+        "🤖 <b>Yangibot Haqida</b>\n\n"
+        "Ushbu bot orqali siz:\n"
+        "1. Ijtimoiy tarmoqlardan video yuklashingiz (4K gacha).\n"
+        "2. Interaktiv mini o'yinlar o'ynashingiz mumkin.\n\n"
+        "Bot aiogram 3.x kutubxonasida yaratilgan.",
+        parse_mode="HTML"
+    )
+
+@dp.message(F.text == "📞 Bog'lanish")
+async def cmd_contact(message: types.Message, state: FSMContext):
+    await state.set_state(UserStates.phone)
+    await message.answer(
+        "☎️ <b>Biz bilan bog'lanish</b>\n\n"
+        "Iltimos, telefon raqamingizni yuboring, operatorlarimiz siz bilan bog'lanishadi.",
+        reply_markup=get_phone_kb(),
+        parse_mode="HTML"
+    )
+
 @dp.callback_query(F.data.startswith("move_"))
 async def process_game_move(callback: CallbackQuery):
     user_move = callback.data.split("_")[1]
@@ -96,9 +162,8 @@ async def process_game_move(callback: CallbackQuery):
     
     result_text = game.format_result_message(user_move, bot_move, result)
     
-    # Animatsiya effekti uchun avval "O'ylamoqda..." deb o'zgartiramiz
     await callback.message.edit_text("⏳ <i>Raqib zarba bermoqda...</i>", parse_mode="HTML")
-    await asyncio.sleep(0.5) # Qisqa pauza
+    await asyncio.sleep(0.5)
     
     await callback.message.edit_text(
         f"{result_text}\n\n🔄 <b>Yana o'ynaysizmi?</b>",
@@ -106,35 +171,12 @@ async def process_game_move(callback: CallbackQuery):
         parse_mode="HTML"
     )
 
-@dp.message(Command("video"))
-async def cmd_video(message: types.Message, state: FSMContext):
-    await state.set_state(UserStates.video_url)
-    await message.answer(
-        "📹 <b>Video yuklash tartibi:</b>\n\n"
-        "Iltimos, video havolasini (link) yuboring.\n"
-        "<i>Men YouTube, Instagram, TikTok va boshqa ko'plab saytlarni qo'llab-quvvatlayman.</i>",
-        parse_mode="HTML",
-        reply_markup=types.ReplyKeyboardMarkup(
-            keyboard=[[types.KeyboardButton(text="❌ Bekor qilish")]],
-            resize_keyboard=True,
-            one_time_keyboard=True
-        )
-    )
-
-@dp.message(F.text == "❌ Bekor qilish")
-async def cmd_cancel(message: types.Message, state: FSMContext):
-    await state.clear()
-    await message.answer(
-        "Amallar bekor qilindi. Boshlash uchun /start ni bosing.",
-        reply_markup=types.ReplyKeyboardRemove()
-    )
-
 @dp.message(UserStates.phone, F.contact)
 async def process_phone(message: types.Message, state: FSMContext):
     await state.update_data(phone=message.contact.phone_number)
     await state.set_state(UserStates.location)
     await message.answer(
-        "Rahmat! Endi manzilingizni yuboring.",
+        "✅ Rahmat! Endi manzilingizni yuboring 📍",
         reply_markup=get_location_kb()
     )
 
@@ -142,107 +184,103 @@ async def process_phone(message: types.Message, state: FSMContext):
 async def process_location(message: types.Message, state: FSMContext):
     data = await state.get_data()
     phone = data.get("phone")
-    latitude = message.location.latitude
-    longitude = message.location.longitude
+    lat = message.location.latitude
+    lon = message.location.longitude
     
     await message.answer(
-        f"✅ Ma'lumotlar qabul qilindi!\n\n📞 Telefon: {phone}\n📍 Manzil: https://www.google.com/maps?q={latitude},{longitude}",
-        reply_markup=types.ReplyKeyboardRemove()
+        f"✅ <b>Ma'lumotlar yuborildi!</b>\n\n"
+        f"📞 Telefon: {phone}\n"
+        f"📍 Manzil: <a href='https://www.google.com/maps?q={lat},{lon}'>Google Maps</a>",
+        reply_markup=get_main_kb(),
+        parse_mode="HTML"
     )
-    # Clear state after finishing
     await state.clear()
 
-@dp.message(UserStates.phone)
-async def phone_invalid(message: types.Message):
-    await message.reply("Iltimos, telefon raqamingizni pastdagi tugma orqali yuboring. 📱")
-
-@dp.message(UserStates.location)
-async def location_invalid(message: types.Message):
-    await message.reply("Iltimos, manzilni pastdagi tugma orqali yuboring. 📍")
-
 # Video Downloader Logic
-@dp.message(UserStates.video_url, lambda msg: msg.text and (msg.text.startswith("http") or "youtube.com" in msg.text or "youtu.be" in msg.text))
+@dp.message(UserStates.video_url, F.text.regexp(r'^https?://'))
 async def process_video_link(message: types.Message, state: FSMContext):
     url = message.text.strip()
-    status_msg = await message.reply("🔍 <i>Video qidirilmoqda...</i>", parse_mode="HTML")
+    status_msg = await message.answer("🔍 <b>Video tahlil qilinmoqda...</b>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     
     qualities, title = await downloader.extract_info(url)
     
     if not qualities:
-        await status_msg.edit_text("❌ <b>Video topilmadi yoki yuklab bo'lmaydi.</b>\nLink to'g'riligini tekshiring.", parse_mode="HTML")
+        await status_msg.edit_text("❌ <b>Video topilmadi yoki bu manzil qo'llab-quvvatlanmaydi.</b>\nIltimos, boshqa link yuboring.", reply_markup=get_back_kb())
         return
 
-    # Create keyboard with quality options
     rows = []
-    chunk_size = 2
-    for i in range(0, len(qualities), chunk_size):
-        chunk = qualities[i:i + chunk_size]
-        row = [InlineKeyboardButton(text=f"📥 {q}", callback_data=f"download_{q}") for q in chunk]
+    for i in range(0, len(qualities), 2):
+        chunk = qualities[i:i + 2]
+        row = [InlineKeyboardButton(text=f"📥 {q.upper()}", callback_data=f"dl_{q}") for q in chunk]
         rows.append(row)
+    
+    rows.append([InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="cancel_dl")])
         
-    # Store URL in memory (simplest way for now, better to use state or temporary storage)
-    # Using a simple trick: append URL hash or ID to callback, but URL might be long.
-    # For now, we'll store it in a simple dict mapping user_id -> url
-    # Note: Global variable is not ideal for production but works for simple bot
     if not hasattr(bot, 'user_urls'):
         bot.user_urls = {}
     bot.user_urls[message.from_user.id] = url
         
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
     
-    ffmpeg_warning = ""
-    if not downloader.ffmpeg_available:
-        ffmpeg_warning = "\n\n⚠️ <i>Diqqat: Tizimda FFmpeg mavjud emas. Yuqori sifatli (1080p, 4K) videolar ovozsiz bo'lishi yoki sifati pasayishi mumkin.</i>"
-
-    await status_msg.edit_text(
-        f"📹 <b>Video:</b> {title}\n"
-        f"✅ <i>Sifatni tanlang:</i>{ffmpeg_warning}",
-        reply_markup=kb,
-        parse_mode="HTML"
+    text = (
+        f"🎬 <b>Video:</b> {title}\n\n"
+        f"✅ <b>Tavsiya etilgan formatlar:</b>\n"
+        f"Marhamat, yuklab olish uchun sifatni tanlang:"
     )
-    await state.clear()
+    
+    if not downloader.ffmpeg_available:
+        text += "\n\n⚠️ <i>Eslatma: Ba'zi yuqori sifatlar ovozsiz bo'lishi mumkin.</i>"
 
-@dp.callback_query(F.data.startswith("download_"))
+    await status_msg.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+@dp.callback_query(F.data == "cancel_dl")
+async def cancel_dl_callback(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.delete()
+    await callback.message.answer("Video yuklash bekor qilindi.", reply_markup=get_main_kb())
+
+@dp.callback_query(F.data.startswith("dl_"))
 async def process_download_callback(callback: CallbackQuery):
     quality = callback.data.split("_")[1]
     user_id = callback.from_user.id
     
     if not hasattr(bot, 'user_urls') or user_id not in bot.user_urls:
-        await callback.answer("❌ Eskirgan so'rov. Linkni qayta yuboring.", show_alert=True)
+        await callback.answer("❌ Seans muddati tugagan.", show_alert=True)
         return
 
     url = bot.user_urls[user_id]
-    status_msg = await callback.message.edit_text(f"⏳ <b>Yuklash boshlandi...</b>\n<i>Sifat: {quality}</i>", parse_mode="HTML")
+    await callback.message.edit_text(f"🚀 <b>Yuklash boshlandi...</b>\n🎬 Sifat: <b>{quality.upper()}</b>\n\n<i>Iltimos, kuting...</i>", parse_mode="HTML")
     
     try:
         filepath = await downloader.download_video(url, quality)
         
         if filepath and os.path.exists(filepath):
-            filesize_mb = os.path.getsize(filepath) / (1024 * 1024)
+            size_mb = os.path.getsize(filepath) / (1024 * 1024)
             
-            if filesize_mb > 50:
-                await status_msg.edit_text(
-                    f"❌ <b>Xatolik:</b> Video hajmi juda katta ({filesize_mb:.1f} MB).\n\n"
-                    f"Telegram botlar orqali faqat 50 MB gacha bo'lgan fayllarni yuborish mumkin.\n"
-                    f"<i>Maslahat: Pastroq sifatni (masalan, 720p yoki 360p) tanlab ko'ring.</i>",
+            if size_mb > 50:
+                 await callback.message.edit_text(
+                    f"⚠️ <b>Hajmi juda katta:</b> {size_mb:.1f} MB\n\n"
+                    f"Telegram botlar 50 MB gacha fayl yubora oladi.\n"
+                    f"<i>Maslahat: 720p yoki 480p tanlang.</i>",
+                    reply_markup=get_back_kb(),
                     parse_mode="HTML"
                 )
             else:
-                await status_msg.edit_text("📤 <b>Video yuborilmoqda...</b>", parse_mode="HTML")
-                video_file = FSInputFile(filepath)
+                await callback.message.edit_text("📤 <b>Video yuborilmoqda...</b>", parse_mode="HTML")
+                video = FSInputFile(filepath)
                 await callback.message.answer_video(
-                    video_file, 
-                    caption=f"🎥 <b>Sifat:</b> {quality}\n⚖️ <b>Hajmi:</b> {filesize_mb:.1f} MB\n🤖 @Yangibot", 
+                    video, 
+                    caption=f"🎥 <b>Sifat:</b> {quality.upper()}\n⚖️ <b>Hajmi:</b> {size_mb:.1f} MB\n🤖 @Yangibot", 
                     parse_mode="HTML"
                 )
-                await status_msg.delete()
+                await callback.message.delete()
+                await callback.message.answer("Yana biror nima yuklaymizmi? 😊", reply_markup=get_main_kb())
         else:
-            await status_msg.edit_text("❌ <b>Yuklashda xatolik yuz berdi.</b>\nBu link yoki sifat ushbu video uchun ishlamadi.")
+            await callback.message.edit_text("❌ <b>Yuklashda xatolik!</b>\nBu sifat yoki video bilan muammo bo'ldi.", reply_markup=get_back_kb())
             
     except Exception as e:
-        await callback.message.answer(f"❌ Kutilmagan xatolik: {str(e)}")
+        await callback.message.answer(f"❌ Xatolik: {str(e)}", reply_markup=get_main_kb())
     finally:
-        # Cleanup is critical
         if 'filepath' in locals() and filepath and os.path.exists(filepath):
             try: os.remove(filepath)
             except: pass
