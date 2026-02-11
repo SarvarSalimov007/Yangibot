@@ -28,36 +28,52 @@ class VideoDownloader:
 
     async def extract_info(self, url):
         """
-        Ultra-robust metadata extraction.
+        Ultra-robust and fast metadata extraction with timeouts.
         """
-        ydl_opts = {
+        # Common options for both extraction and download
+        base_opts = {
             'quiet': True,
             'no_warnings': True,
-            'skip_download': True,
-            'check_formats': True,
             'user_agent': self.user_agent,
+            'nocheckcertificate': True,
+            'no_color': True,
+            'socket_timeout': 10, # 10 second timeout for network operations
+            'retries': 3,
             'add_header': [
-                'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Accept-Language: en-US,en;q=0.9',
             ],
-            'nocheckcertificate': True,
-            'ignoreerrors': False,
-            'no_color': True,
-            'extract_flat': False,
+        }
+
+        ydl_opts = {
+            **base_opts,
+            'skip_download': True,
+            'check_formats': False, # Faster extraction
+            'lazy_playlist': True,
+            'extract_flat': 'in_playlist',
         }
         
         loop = asyncio.get_event_loop()
         try:
+            # Wrap the extractor in a timeout to prevent persistent hangs
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                 info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=False))
+                # Use a larger timeout for the overall process (20s)
+                info = await asyncio.wait_for(
+                    loop.run_in_executor(None, ydl.extract_info, url, False),
+                    timeout=20.0
+                )
                  
+            if not info:
+                return [], None
+
             formats = info.get('formats', [])
             available_qualities = set()
             
+            # Filter formats to ensure they have video AND aren't just storyboards
             for f in formats:
-                # Handle cases where height/resolution is missing but it's a valid format
                 height = f.get('height')
-                if f.get('vcodec') != 'none' and height:
+                # Ignore if no height or if it's a known non-video format (like mhtml)
+                if height and f.get('vcodec') != 'none' and f.get('acodec') != 'none':
                     if height >= 2160: available_qualities.add('4k')
                     elif height >= 1440: available_qualities.add('2k')
                     elif height >= 1080: available_qualities.add('1080p')
@@ -66,22 +82,31 @@ class VideoDownloader:
                     elif height >= 360: available_qualities.add('360p')
                     else: available_qualities.add('low')
 
-            # If no heights found but formats exist, at least add 'best'
+            # Fallback if no specific heights found but formats exist
             if not available_qualities and formats:
                 available_qualities.add('best')
 
             priority = ['4k', '2k', '1080p', '720p', '480p', '360p', 'low', 'best']
             sorted_qualities = [q for q in priority if q in available_qualities]
             
-            return sorted_qualities, info.get('title', 'Video')
+            # Use slicing carefully for the linter
+            length = min(len(sorted_qualities), 6)
+            final_qualities = []
+            for i in range(length):
+                final_qualities.append(sorted_qualities[i])
+                
+            return final_qualities, str(info.get('title', 'Video'))
             
+        except asyncio.TimeoutError:
+            print(f"Extraction Timeout for {url}")
+            return [], "TIMEOUT"
         except Exception as e:
             print(f"Extraction Error: {e}")
             return [], None
 
     async def download_video(self, url, quality):
         """
-        Optimized downloader for maximum speed and exact quality.
+        Optimized downloader for maximum speed and exact quality with timeouts.
         """
         unique_id = self._generate_unique_id()
         
@@ -90,12 +115,12 @@ class VideoDownloader:
         target_h = h_map.get(quality, 0)
 
         # Build format string for stability and quality
-        # We try to get the EXACT height if possible, then fallback to best
         if self.ffmpeg_available:
             if target_h > 0:
                 format_str = (
                     f"bestvideo[height={target_h}][ext=mp4]+bestaudio[ext=m4a]/"
                     f"bestvideo[height<={target_h}][ext=mp4]+bestaudio[ext=m4a]/"
+                    f"bestvideo[height<={target_h}]+bestaudio/"
                     f"best[height<={target_h}][ext=mp4]/"
                     f"best"
                 )
@@ -123,10 +148,10 @@ class VideoDownloader:
             'noplaylist': True,
             
             # --- SPEED OPTIMIZATIONS ---
-            'concurrent_fragment_downloads': 10, # Download 10 fragments in parallel
-            'retries': 10,
-            'fragment_retries': 10,
-            'socket_timeout': 30,
+            'concurrent_fragment_downloads': 15, # Increased for speed
+            'retries': 5,
+            'fragment_retries': 5,
+            'socket_timeout': 15,
             'buffersize': 1024 * 1024, # 1MB buffer
             'http_chunk_size': 10 * 1024 * 1024, # 10MB chunks
             
@@ -136,13 +161,18 @@ class VideoDownloader:
         loop = asyncio.get_event_loop()
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
+                # Overall download timeout (5 minutes for big videos)
+                info = await asyncio.wait_for(
+                    loop.run_in_executor(None, ydl.extract_info, url),
+                    timeout=300.0
+                )
                 
                 if 'requested_downloads' in info:
                     filepath = info['requested_downloads'][0]['filepath']
                 else: 
                     filepath = ydl.prepare_filename(info)
                 
+                # Verify existence and extension
                 if not os.path.exists(filepath):
                     base = os.path.splitext(filepath)[0]
                     for ext in ['.mp4', '.mkv', '.webm', '.flv', '.3gp']:
@@ -151,6 +181,9 @@ class VideoDownloader:
                             break
                             
                 return filepath
+        except asyncio.TimeoutError:
+            print(f"Download Timeout for {url}")
+            return None
         except Exception as e:
             print(f"Download Error for {url}: {e}")
             return None

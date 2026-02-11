@@ -273,13 +273,20 @@ async def process_video_link(message: types.Message, state: FSMContext):
     
     qualities, title = await downloader.extract_info(url)
     
+    if title == "TIMEOUT":
+        await status_msg.edit_text("⚠️ <b>Tahlil juda uzoq davom etdi.</b>\nIltimos, bir ozdan so'ng yana urinib ko'ring yoki boshqa link yuboring.", reply_markup=get_back_kb())
+        return
+        
     if not qualities:
         await status_msg.edit_text("❌ <b>Video topilmadi yoki bu manzil qo'llab-quvvatlanmaydi.</b>\nIltimos, boshqa link yuboring.", reply_markup=get_back_kb())
         return
 
     rows = []
-    for i in range(0, len(qualities), 2):
-        chunk = qualities[i:i + 2]
+    qualities_list = list(qualities)
+    for i in range(0, len(qualities_list), 2):
+        chunk = []
+        if i < len(qualities_list): chunk.append(qualities_list[i])
+        if i + 1 < len(qualities_list): chunk.append(qualities_list[i+1])
         row = [InlineKeyboardButton(text=f"📥 {q.upper()}", callback_data=f"dl_{q}") for q in chunk]
         rows.append(row)
     
@@ -317,6 +324,7 @@ async def process_download_callback(callback: CallbackQuery, state: FSMContext):
         return
     await callback.message.edit_text(f"🚀 <b>Yuklash boshlandi...</b>\n🎬 Sifat: <b>{quality.upper()}</b>\n\n<i>Iltimos, kuting...</i>", parse_mode="HTML")
     
+    filepath = None
     try:
         filepath = await downloader.download_video(url, quality)
         
@@ -347,7 +355,7 @@ async def process_download_callback(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         await callback.message.answer(f"❌ Xatolik: {str(e)}", reply_markup=get_main_kb())
     finally:
-        if 'filepath' in locals() and filepath and os.path.exists(filepath):
+        if filepath and os.path.exists(filepath):
             try: os.remove(filepath)
             except: pass
 
