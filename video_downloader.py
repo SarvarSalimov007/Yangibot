@@ -81,7 +81,7 @@ class VideoDownloader:
 
     async def download_video(self, url, quality):
         """
-        Ultra-robust downloader with fallback logic and unique filenames.
+        Optimized downloader for maximum speed and exact quality.
         """
         unique_id = self._generate_unique_id()
         
@@ -89,14 +89,19 @@ class VideoDownloader:
         h_map = {'4k': 2160, '2k': 1440, '1080p': 1080, '720p': 720, '480p': 480, '360p': 360}
         target_h = h_map.get(quality, 0)
 
-        # Build format string for stability
+        # Build format string for stability and quality
+        # We try to get the EXACT height if possible, then fallback to best
         if self.ffmpeg_available:
             if target_h > 0:
-                format_str = f"bestvideo[height<={target_h}][ext=mp4]+bestaudio[ext=m4a]/best[height<={target_h}]/best"
+                format_str = (
+                    f"bestvideo[height={target_h}][ext=mp4]+bestaudio[ext=m4a]/"
+                    f"bestvideo[height<={target_h}][ext=mp4]+bestaudio[ext=m4a]/"
+                    f"best[height<={target_h}][ext=mp4]/"
+                    f"best"
+                )
             else:
                 format_str = "bestvideo+bestaudio/best"
         else:
-            # WITHOUT FFMPEG: We MUST use a single format that has both video and audio
             if target_h > 0:
                 format_str = f"best[height<={target_h}][ext=mp4]/best[height<={target_h}]/best"
             else:
@@ -115,24 +120,29 @@ class VideoDownloader:
             'nocheckcertificate': True,
             'merge_output_format': 'mp4' if self.ffmpeg_available else None,
             'writethumbnail': False,
-            'postprocessors': [{'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'}] if self.ffmpeg_available else [],
             'noplaylist': True,
+            
+            # --- SPEED OPTIMIZATIONS ---
+            'concurrent_fragment_downloads': 10, # Download 10 fragments in parallel
+            'retries': 10,
+            'fragment_retries': 10,
+            'socket_timeout': 30,
+            'buffersize': 1024 * 1024, # 1MB buffer
+            'http_chunk_size': 10 * 1024 * 1024, # 10MB chunks
+            
+            'postprocessors': [{'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'}] if self.ffmpeg_available else [],
         }
 
         loop = asyncio.get_event_loop()
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # Run download in executor to keep bot responsive
                 info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
                 
-                # Retrieve the actual filepath from info
-                # yt-dlp might have merged or changed extension
                 if 'requested_downloads' in info:
                     filepath = info['requested_downloads'][0]['filepath']
                 else: 
                     filepath = ydl.prepare_filename(info)
                 
-                # Double check existence and potential extension changes (e.g. .mkv -> .mp4)
                 if not os.path.exists(filepath):
                     base = os.path.splitext(filepath)[0]
                     for ext in ['.mp4', '.mkv', '.webm', '.flv', '.3gp']:

@@ -8,6 +8,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
 from game import BoxingGame
 from video_downloader import VideoDownloader
+from math_quiz import MathQuiz
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -25,12 +26,12 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 # Keyboards
-# Keyboards
 def get_main_kb():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📹 Video Yuklash"), KeyboardButton(text="🎮 O'yin O'ynash")],
-            [KeyboardButton(text="ℹ️ Ma'lumot"), KeyboardButton(text="📞 Bog'lanish")]
+            [KeyboardButton(text="🧮 Matematika"), KeyboardButton(text="ℹ️ Ma'lumot")],
+            [KeyboardButton(text="📞 Bog'lanish")]
         ],
         resize_keyboard=True
     )
@@ -78,9 +79,10 @@ def get_game_kb():
         ]
     )
 
-# Initialize Game
+# Initialize Logic Components
 game = BoxingGame()
 downloader = VideoDownloader()
+math_quiz = MathQuiz()
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
@@ -154,6 +156,73 @@ async def cmd_contact(message: types.Message, state: FSMContext):
         parse_mode="HTML"
     )
 
+@dp.message(F.text == "🧮 Matematika")
+@dp.message(Command("math"))
+async def cmd_math(message: types.Message, state: FSMContext):
+    question, options, correct_label = math_quiz.generate_question()
+    
+    # Store correct answer in state
+    await state.update_data(math_correct=correct_label)
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"A: {options['A']}", callback_data="math_A")],
+        [InlineKeyboardButton(text=f"B: {options['B']}", callback_data="math_B")],
+        [InlineKeyboardButton(text=f"C: {options['C']}", callback_data="math_C")],
+        [InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="back_to_main")]
+    ])
+    
+    await message.answer(
+        f"<b>🧮 Matematika Savoli</b>\n\n"
+        f"Savol: <code>{question}</code>\n\n"
+        f"To'g'ri javobni tanlang:",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.startswith("math_"))
+async def process_math_answer(callback: CallbackQuery, state: FSMContext):
+    if callback.data == "math_next":
+        question, options, correct_label = math_quiz.generate_question()
+        await state.update_data(math_correct=correct_label)
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"A: {options['A']}", callback_data="math_A")],
+            [InlineKeyboardButton(text=f"B: {options['B']}", callback_data="math_B")],
+            [InlineKeyboardButton(text=f"C: {options['C']}", callback_data="math_C")],
+            [InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="back_to_main")]
+        ])
+        
+        await callback.message.edit_text(
+            f"<b>🧮 Matematika Savoli</b>\n\n"
+            f"Savol: <code>{question}</code>\n\n"
+            f"To'g'ri javobni tanlang:",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+        return
+
+    user_answer = callback.data.split("_")[1]
+    data = await state.get_data()
+    correct_label = data.get("math_correct")
+    
+    if not correct_label:
+        await callback.answer("⚠️ Savol muddati o'tgan yoki xatolik yuz berdi.", show_alert=True)
+        return
+
+    if user_answer == correct_label:
+        text = "✅ <b>To'g'ri!</b>\nBarakalla, siz matematikani yaxshi bilasiz! 🚀"
+    else:
+        text = f"❌ <b>Noto'g'ri!</b>\nTo'g'ri javob: <b>{correct_label}</b> edi. 😔"
+    
+    await callback.message.edit_text(
+        f"{text}\n\n🔄 <b>Yana bir urinib ko'rasizmi?</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Yana bir savol", callback_data="math_next")],
+            [InlineKeyboardButton(text="⬅️ Asosiy Menuga", callback_data="back_to_main")]
+        ]),
+        parse_mode="HTML"
+    )
+
 @dp.callback_query(F.data.startswith("move_"))
 async def process_game_move(callback: CallbackQuery):
     user_move = callback.data.split("_")[1]
@@ -216,9 +285,7 @@ async def process_video_link(message: types.Message, state: FSMContext):
     
     rows.append([InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="cancel_dl")])
         
-    if not hasattr(bot, 'user_urls'):
-        bot.user_urls = {}
-    bot.user_urls[message.from_user.id] = url
+    await state.update_data(video_url=url)
         
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
     
@@ -240,15 +307,14 @@ async def cancel_dl_callback(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("Video yuklash bekor qilindi.", reply_markup=get_main_kb())
 
 @dp.callback_query(F.data.startswith("dl_"))
-async def process_download_callback(callback: CallbackQuery):
+async def process_download_callback(callback: CallbackQuery, state: FSMContext):
     quality = callback.data.split("_")[1]
-    user_id = callback.from_user.id
+    data = await state.get_data()
+    url = data.get("video_url")
     
-    if not hasattr(bot, 'user_urls') or user_id not in bot.user_urls:
+    if not url:
         await callback.answer("❌ Seans muddati tugagan.", show_alert=True)
         return
-
-    url = bot.user_urls[user_id]
     await callback.message.edit_text(f"🚀 <b>Yuklash boshlandi...</b>\n🎬 Sifat: <b>{quality.upper()}</b>\n\n<i>Iltimos, kuting...</i>", parse_mode="HTML")
     
     try:
