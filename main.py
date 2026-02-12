@@ -1,15 +1,16 @@
 import asyncio
 import logging
 import os
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
-from game import BoxingGame
-from video_downloader import VideoDownloader
-from math_quiz import MathQuiz
-from dotenv import load_dotenv
+from aiogram import Bot, Dispatcher, types, F  # type: ignore
+from aiogram.filters import Command  # type: ignore
+from aiogram.fsm.context import FSMContext  # type: ignore
+from aiogram.fsm.state import State, StatesGroup  # type: ignore
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile  # type: ignore
+from game import BoxingGame  # type: ignore
+from video_downloader import VideoDownloader  # type: ignore
+from math_quiz import MathQuiz  # type: ignore
+from dotenv import load_dotenv  # type: ignore
+from typing import List, Any, Optional, cast
 
 # Load environment variables
 load_dotenv()
@@ -273,21 +274,34 @@ async def process_video_link(message: types.Message, state: FSMContext):
     
     qualities, title = await downloader.extract_info(url)
     
+    # Cast qualities to a list explicitly for the linter with proper typing
+    qualities_raw: Any = qualities
+    qualities_list: List[str] = list(qualities_raw) if qualities_raw else []
+    
     if title == "TIMEOUT":
-        await status_msg.edit_text("⚠️ <b>Tahlil juda uzoq davom etdi.</b>\nIltimos, bir ozdan so'ng yana urinib ko'ring yoki boshqa link yuboring.", reply_markup=get_back_kb())
+        await status_msg.edit_text("⏳ <b>Tahlil juda uzoq davom etdi.</b>\nIltimos, qaytadan urinib ko'ring.", reply_markup=get_back_kb())
         return
-        
-    if not qualities:
-        await status_msg.edit_text("❌ <b>Video topilmadi yoki bu manzil qo'llab-quvvatlanmaydi.</b>\nIltimos, boshqa link yuboring.", reply_markup=get_back_kb())
+    elif title == "SIGN_IN":
+        await status_msg.edit_text("🔞 <b>Bu video yoshga doir cheklovga ega yoki login talab qiladi.</b>", reply_markup=get_back_kb())
+        return
+    elif title == "PRIVATE":
+        await status_msg.edit_text("🔒 <b>Bu video shaxsiy (private) yoki o'chirilgan.</b>", reply_markup=get_back_kb())
+        return
+    elif title == "ERROR" or not qualities_list:
+        await status_msg.edit_text("❌ <b>Videoni tahlil qilib bo'lmadi.</b>\nLink to'g'riligini tekshiring.", reply_markup=get_back_kb())
         return
 
-    rows = []
-    qualities_list = list(qualities)
+    rows: List[List[InlineKeyboardButton]] = []
+    # Build keyboard rows without slicing to appease all linters
     for i in range(0, len(qualities_list), 2):
-        chunk = []
-        if i < len(qualities_list): chunk.append(qualities_list[i])
-        if i + 1 < len(qualities_list): chunk.append(qualities_list[i+1])
-        row = [InlineKeyboardButton(text=f"📥 {q.upper()}", callback_data=f"dl_{q}") for q in chunk]
+        row: List[InlineKeyboardButton] = []
+        # First button
+        q1 = str(qualities_list[i])
+        row.append(InlineKeyboardButton(text=f"📥 {q1.upper()}", callback_data=f"dl_{q1}"))
+        # Second button (optional)
+        if i + 1 < len(qualities_list):
+            q2 = str(qualities_list[i+1])
+            row.append(InlineKeyboardButton(text=f"📥 {q2.upper()}", callback_data=f"dl_{q2}"))
         rows.append(row)
     
     rows.append([InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="cancel_dl")])
@@ -324,9 +338,10 @@ async def process_download_callback(callback: CallbackQuery, state: FSMContext):
         return
     await callback.message.edit_text(f"🚀 <b>Yuklash boshlandi...</b>\n🎬 Sifat: <b>{quality.upper()}</b>\n\n<i>Iltimos, kuting...</i>", parse_mode="HTML")
     
-    filepath = None
+    filepath: Optional[str] = None
     try:
-        filepath = await downloader.download_video(url, quality)
+        download_result: Any = await downloader.download_video(url, quality)
+        filepath = cast(Optional[str], download_result)
         
         if filepath and os.path.exists(filepath):
             size_mb = os.path.getsize(filepath) / (1024 * 1024)
@@ -355,9 +370,11 @@ async def process_download_callback(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         await callback.message.answer(f"❌ Xatolik: {str(e)}", reply_markup=get_main_kb())
     finally:
-        if filepath and os.path.exists(filepath):
-            try: os.remove(filepath)
-            except: pass
+        if filepath is not None and os.path.exists(str(filepath)):
+            try: 
+                os.remove(str(filepath))
+            except: 
+                pass
 
 async def main():
     logging.basicConfig(level=logging.INFO)

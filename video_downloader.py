@@ -1,10 +1,11 @@
-import yt_dlp
+import yt_dlp  # type: ignore
 import os
 import asyncio
 import subprocess
 import time
 import random
 import string
+from typing import Any, cast, List
 
 class VideoDownloader:
     def __init__(self):
@@ -58,10 +59,15 @@ class VideoDownloader:
             # Wrap the extractor in a timeout to prevent persistent hangs
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 # Use a larger timeout for the overall process (20s)
-                info = await asyncio.wait_for(
+                # We use a simple lambda with positional args to satisfy the linter
+                info_raw: Any = await asyncio.wait_for(
                     loop.run_in_executor(None, ydl.extract_info, url, False),
                     timeout=20.0
                 )
+                info = cast(dict[str, Any], info_raw)
+                 
+            if not info or not isinstance(info, dict):
+                return [], None
                  
             if not info:
                 return [], None
@@ -73,7 +79,7 @@ class VideoDownloader:
             for f in formats:
                 height = f.get('height')
                 # Ignore if no height or if it's a known non-video format (like mhtml)
-                if height and f.get('vcodec') != 'none' and f.get('acodec') != 'none':
+                if height and f.get('vcodec') != 'none':
                     if height >= 2160: available_qualities.add('4k')
                     elif height >= 1440: available_qualities.add('2k')
                     elif height >= 1080: available_qualities.add('1080p')
@@ -82,18 +88,22 @@ class VideoDownloader:
                     elif height >= 360: available_qualities.add('360p')
                     else: available_qualities.add('low')
 
-            # Fallback if no specific heights found but formats exist
+            # Fallback if no specific heights found
             if not available_qualities and formats:
                 available_qualities.add('best')
 
             priority = ['4k', '2k', '1080p', '720p', '480p', '360p', 'low', 'best']
             sorted_qualities = [q for q in priority if q in available_qualities]
             
-            # Use slicing carefully for the linter
-            length = min(len(sorted_qualities), 6)
-            final_qualities = []
-            for i in range(length):
-                final_qualities.append(sorted_qualities[i])
+            # If still empty, try to just return 'best' as a last resort
+            if not sorted_qualities:
+                sorted_qualities = ['best']
+
+            # Avoid slicing to satisfy all linter types
+            final_qualities: List[str] = []
+            for i in range(min(len(sorted_qualities), 6)):
+                val = sorted_qualities[i]
+                final_qualities.append(str(val))
                 
             return final_qualities, str(info.get('title', 'Video'))
             
@@ -102,7 +112,10 @@ class VideoDownloader:
             return [], "TIMEOUT"
         except Exception as e:
             print(f"Extraction Error: {e}")
-            return [], None
+            error_msg = str(e)
+            if "sign in" in error_msg.lower(): return [], "SIGN_IN"
+            if "private" in error_msg.lower(): return [], "PRIVATE"
+            return [], "ERROR"
 
     async def download_video(self, url, quality):
         """
@@ -162,10 +175,15 @@ class VideoDownloader:
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 # Overall download timeout (5 minutes for big videos)
-                info = await asyncio.wait_for(
+                info_raw: Any = await asyncio.wait_for(
                     loop.run_in_executor(None, ydl.extract_info, url),
                     timeout=300.0
                 )
+                
+                info = cast(dict[str, Any], info_raw)
+                
+                if not info or not isinstance(info, dict):
+                    return None
                 
                 if 'requested_downloads' in info:
                     filepath = info['requested_downloads'][0]['filepath']
